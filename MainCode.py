@@ -1,18 +1,30 @@
+```python
 import streamlit as st
 import pandas as pd
 import numpy as np
 
 
 # ============================================================
-# KPAX ENGINE
+# PAGE CONFIG
 # ============================================================
 
-APP_VERSION = "KPAX Weekly Engine V1.0"
+st.set_page_config(
+    page_title="KPAX Weekly Investment Engine",
+    page_icon="📊",
+    layout="wide"
+)
 
 
-# ------------------------------------------------------------
+# ============================================================
+# VERSION
+# ============================================================
+
+VERSION = "KPAX V2.0"
+
+
+# ============================================================
 # DEFAULT WEIGHTS
-# ------------------------------------------------------------
+# ============================================================
 
 DEFAULT_WEIGHTS = {
     "kpax": 0.35,
@@ -23,19 +35,77 @@ DEFAULT_WEIGHTS = {
 
 
 # ============================================================
-# SCORE HELPERS
+# DEFAULT KPAX UNIVERSE
+# ============================================================
+
+DEFAULT_TICKERS = {
+    "NVDA": "NVIDIA",
+    "MSFT": "Microsoft",
+    "AMZN": "Amazon",
+    "GOOGL": "Alphabet",
+    "ASML": "ASML",
+    "TSM": "TSMC",
+    "005930.KS": "Samsung Electronics",
+    "000660.KS": "SK Hynix",
+    "MU": "Micron",
+    "MRVL": "Marvell",
+    "AMD": "AMD",
+    "INTC": "Intel",
+
+    "SAP.DE": "SAP",
+    "BMW.DE": "BMW",
+    "ALV.DE": "Allianz",
+    "IFX.DE": "Infineon",
+    "ENR.DE": "Siemens Energy",
+    "AIR.PA": "Airbus",
+
+    "NVO": "Novo Nordisk",
+    "PFE": "Pfizer",
+
+    "KO": "Coca-Cola",
+    "PEP": "PepsiCo",
+    "MCD": "McDonald's",
+    "NFLX": "Netflix",
+    "NKE": "Nike",
+
+    "EQIX": "Equinix",
+    "VRT": "Vertiv",
+    "VST": "Vistra",
+    "IREN": "IREN",
+
+    "1810.HK": "Xiaomi",
+    "NOK": "Nokia",
+    "BYDDF": "BYD",
+    "TCEHY": "Tencent",
+    "5802.T": "Sumitomo Electric",
+}
+
+
+# ============================================================
+# SESSION STATE
+# ============================================================
+
+if "kpax_tickers" not in st.session_state:
+    st.session_state.kpax_tickers = DEFAULT_TICKERS.copy()
+
+
+# ============================================================
+# HELPER FUNCTIONS
 # ============================================================
 
 def clamp(value, minimum=0, maximum=100):
-    """Begrenzt einen Wert auf 0-100."""
+
     if value is None or pd.isna(value):
         return np.nan
 
-    return max(minimum, min(maximum, float(value)))
+    return max(
+        minimum,
+        min(maximum, float(value))
+    )
 
 
 def safe(value, default=0):
-    """Ersetzt NaN/None durch default."""
+
     if value is None or pd.isna(value):
         return default
 
@@ -43,142 +113,10 @@ def safe(value, default=0):
 
 
 # ============================================================
-# 1. QUALITY SCORE
-# ============================================================
-
-def calculate_quality_score(
-    roic,
-    gross_margin,
-    fcf_margin,
-    earnings_growth,
-    revenue_growth,
-    is_financial=False,
-    roe=None,
-    net_margin=None,
-):
-    """
-    QUALITY SCORE
-
-    Normale Unternehmen:
-        ROIC             30 %
-        Gross Margin     15 %
-        FCF Margin       20 %
-        Earnings Growth  20 %
-        Revenue Growth   15 %
-
-    Financials:
-        ROE              40 %
-        Net Margin       30 %
-        Earnings Growth  20 %
-        Revenue Growth   10 %
-
-    Alle Einzelwerte werden zunächst auf 0-100 normalisiert.
-    """
-
-    if is_financial:
-
-        roe_score = normalize_metric(roe, -5, 30)
-        net_margin_score = normalize_metric(net_margin, -10, 40)
-        earnings_score = normalize_growth(earnings_growth)
-        revenue_score = normalize_growth(revenue_growth)
-
-        score = (
-            0.40 * roe_score
-            + 0.30 * net_margin_score
-            + 0.20 * earnings_score
-            + 0.10 * revenue_score
-        )
-
-    else:
-
-        roic_score = normalize_metric(roic, -5, 30)
-        gross_margin_score = normalize_metric(gross_margin, 0, 80)
-        fcf_margin_score = normalize_metric(fcf_margin, -20, 40)
-        earnings_score = normalize_growth(earnings_growth)
-        revenue_score = normalize_growth(revenue_growth)
-
-        score = (
-            0.30 * roic_score
-            + 0.15 * gross_margin_score
-            + 0.20 * fcf_margin_score
-            + 0.20 * earnings_score
-            + 0.15 * revenue_score
-        )
-
-    return clamp(score)
-
-
-# ============================================================
-# 2. FUTURE SCORE
-# ============================================================
-
-def calculate_future_score(
-    earnings_growth,
-    revenue_growth,
-    growth_trend,
-    analyst_growth,
-    fcf_profitability_trend,
-    turnaround_potential,
-):
-    """
-    FUTURE SCORE
-
-        Earnings Growth              30 %
-        Revenue Growth               20 %
-        Growth Trend                 15 %
-        Analyst Growth / Target      15 %
-        FCF / Profitability Trend    10 %
-        Turnaround Potential         10 %
-    """
-
-    earnings_score = normalize_growth(earnings_growth)
-    revenue_score = normalize_growth(revenue_growth)
-
-    growth_trend = clamp(growth_trend)
-    analyst_growth = clamp(analyst_growth)
-    fcf_profitability_trend = clamp(fcf_profitability_trend)
-    turnaround_potential = clamp(turnaround_potential)
-
-    score = (
-        0.30 * earnings_score
-        + 0.20 * revenue_score
-        + 0.15 * growth_trend
-        + 0.15 * analyst_growth
-        + 0.10 * fcf_profitability_trend
-        + 0.10 * turnaround_potential
-    )
-
-    return clamp(score)
-
-
-# ============================================================
-# 3. KPAX
-# ============================================================
-
-def calculate_kpax(quality_score, future_score):
-    """
-    KPAX
-
-        40 % Quality
-        60 % Future
-    """
-
-    score = (
-        0.40 * quality_score
-        + 0.60 * future_score
-    )
-
-    return clamp(score)
-
-
-# ============================================================
 # NORMALIZATION
 # ============================================================
 
 def normalize_metric(value, minimum, maximum):
-    """
-    Lineare Normalisierung auf 0-100.
-    """
 
     if value is None or pd.isna(value):
         return 50.0
@@ -196,53 +134,165 @@ def normalize_metric(value, minimum, maximum):
 
 
 def normalize_growth(value):
-    """
-    Wachstumswert auf 0-100.
-
-    Orientierung:
-
-        <= -20 %  -> 0
-        0 %       -> ~50
-        +20 %     -> ~75
-        +40 %     -> ~100
-
-    Werte werden bewusst nicht beliebig über 100 hinaus
-    laufen gelassen.
-    """
 
     if value is None or pd.isna(value):
         return 50.0
 
     value = float(value)
 
-    score = 50 + (value * 1.25)
+    score = 50 + value * 1.25
 
     return clamp(score)
 
 
 # ============================================================
-# 4. FAIR VALUE
+# QUALITY SCORE
+# ============================================================
+
+def calculate_quality_score(
+    roic,
+    gross_margin,
+    fcf_margin,
+    earnings_growth,
+    revenue_growth,
+    is_financial=False,
+    roe=None,
+    net_margin=None,
+):
+
+    if is_financial:
+
+        roe_score = normalize_metric(
+            roe, -5, 30
+        )
+
+        net_margin_score = normalize_metric(
+            net_margin, -10, 40
+        )
+
+        earnings_score = normalize_growth(
+            earnings_growth
+        )
+
+        revenue_score = normalize_growth(
+            revenue_growth
+        )
+
+        score = (
+            0.40 * roe_score
+            + 0.30 * net_margin_score
+            + 0.20 * earnings_score
+            + 0.10 * revenue_score
+        )
+
+    else:
+
+        roic_score = normalize_metric(
+            roic, -5, 30
+        )
+
+        gross_margin_score = normalize_metric(
+            gross_margin, 0, 80
+        )
+
+        fcf_margin_score = normalize_metric(
+            fcf_margin, -20, 40
+        )
+
+        earnings_score = normalize_growth(
+            earnings_growth
+        )
+
+        revenue_score = normalize_growth(
+            revenue_growth
+        )
+
+        score = (
+            0.30 * roic_score
+            + 0.15 * gross_margin_score
+            + 0.20 * fcf_margin_score
+            + 0.20 * earnings_score
+            + 0.15 * revenue_score
+        )
+
+    return clamp(score)
+
+
+# ============================================================
+# FUTURE SCORE
+# ============================================================
+
+def calculate_future_score(
+    earnings_growth,
+    revenue_growth,
+    growth_trend,
+    analyst_growth,
+    fcf_profitability_trend,
+    turnaround_potential,
+):
+
+    earnings_score = normalize_growth(
+        earnings_growth
+    )
+
+    revenue_score = normalize_growth(
+        revenue_growth
+    )
+
+    score = (
+        0.30 * earnings_score
+        + 0.20 * revenue_score
+        + 0.15 * clamp(growth_trend)
+        + 0.15 * clamp(analyst_growth)
+        + 0.10 * clamp(fcf_profitability_trend)
+        + 0.10 * clamp(turnaround_potential)
+    )
+
+    return clamp(score)
+
+
+# ============================================================
+# KPAX
+# ============================================================
+
+def calculate_kpax(
+    quality_score,
+    future_score
+):
+
+    return clamp(
+        0.40 * quality_score
+        + 0.60 * future_score
+    )
+
+
+# ============================================================
+# FAIR VALUE
 # ============================================================
 
 def calculate_fair_value(
     analyst_target,
     fcf_fair_value,
-    analyst_weight=0.60,
+    analyst_weight=0.60
 ):
-    """
-    Fair Value
-
-        60 % Analyst Target
-        40 % FCF-based Fair Value
-    """
 
     values = []
 
-    if analyst_target is not None and not pd.isna(analyst_target):
-        values.append(("analyst", float(analyst_target)))
+    if (
+        analyst_target is not None
+        and not pd.isna(analyst_target)
+    ):
+        values.append(
+            ("analyst", float(analyst_target))
+        )
 
-    if fcf_fair_value is not None and not pd.isna(fcf_fair_value):
-        values.append(("fcf", float(fcf_fair_value)))
+    if (
+        fcf_fair_value is not None
+        and not pd.isna(fcf_fair_value)
+    ):
+        values.append(
+            ("fcf", float(fcf_fair_value))
+        )
 
     if not values:
         return np.nan
@@ -260,15 +310,13 @@ def calculate_fair_value(
 
 
 # ============================================================
-# 5. FV UPSIDE
+# FV UPSIDE
 # ============================================================
 
-def calculate_fv_upside(current_price, fair_value):
-    """
-    FV-Upside:
-
-        (Fair Value - Kurs) / Kurs * 100
-    """
+def calculate_fv_upside(
+    current_price,
+    fair_value
+):
 
     if (
         current_price is None
@@ -287,109 +335,90 @@ def calculate_fv_upside(current_price, fair_value):
 
 
 # ============================================================
-# 6. KPAX-FV SCORE
+# KPAX-FV
 # ============================================================
 
-def calculate_kpax_fv_score(fv_upside):
-    """
-    KPAX-FV Bewertung gemäß unserer Bandlogik.
-
-    > +40 %      -> 95-100
-    +25 bis +40  -> 85-95
-    +15 bis +25  -> 75-85
-    +5 bis +15   -> 65-75
-    0 bis +5      -> 50-65
-    0 bis -15     -> 35-50
-    -15 bis -30   -> 20-35
-    < -30 %      -> 0-20
-    """
+def calculate_kpax_fv_score(
+    fv_upside
+):
 
     if fv_upside is None or pd.isna(fv_upside):
         return np.nan
 
     u = float(fv_upside)
 
-    # Stark unterbewertet
     if u >= 40:
         return 100
 
-    # 25-40 %
     if u >= 25:
-        return 85 + ((u - 25) / 15) * 15
+        return 85 + (
+            (u - 25) / 15
+        ) * 15
 
-    # 15-25 %
     if u >= 15:
-        return 75 + ((u - 15) / 10) * 10
+        return 75 + (
+            (u - 15) / 10
+        ) * 10
 
-    # 5-15 %
     if u >= 5:
-        return 65 + ((u - 5) / 10) * 10
+        return 65 + (
+            (u - 5) / 10
+        ) * 10
 
-    # 0-5 %
     if u >= 0:
-        return 50 + (u / 5) * 15
+        return 50 + (
+            u / 5
+        ) * 15
 
-    # 0 bis -15 %
     if u >= -15:
-        return 35 + ((u + 15) / 15) * 15
+        return 35 + (
+            (u + 15) / 15
+        ) * 15
 
-    # -15 bis -30 %
     if u >= -30:
-        return 20 + ((u + 30) / 15) * 15
+        return 20 + (
+            (u + 30) / 15
+        ) * 15
 
-    # >30 % über Fair Value
     return max(
         0,
-        20 + ((u + 30) / 30) * 20
+        20 + (
+            (u + 30) / 30
+        ) * 20
     )
 
 
 # ============================================================
-# 7. DIP SCORE
+# DIP SCORE
 # ============================================================
 
 def calculate_dip_score(
     price_change,
     earnings_change=0,
     revenue_change=0,
-    analyst_target_change=0,
+    analyst_target_change=0
 ):
-    """
-    DIP SCORE
-
-    Idee:
-    Ein starker Kursrückgang ist interessant, wenn sich
-    die Fundamentaldaten deutlich weniger verschlechtert haben.
-
-    Je größer die Differenz zwischen Kursentwicklung und
-    Fundamentaldaten, desto höher der Dip Score.
-    """
 
     price_change = safe(price_change)
     earnings_change = safe(earnings_change)
     revenue_change = safe(revenue_change)
-    analyst_target_change = safe(analyst_target_change)
+    analyst_target_change = safe(
+        analyst_target_change
+    )
 
-    # Fundamentale Entwicklung
     fundamental_change = (
         0.50 * earnings_change
         + 0.25 * revenue_change
         + 0.25 * analyst_target_change
     )
 
-    # "Ungerechtfertigter" Kursrückgang
-    divergence = fundamental_change - price_change
+    divergence = (
+        fundamental_change
+        - price_change
+    )
 
-    # Kein wirklicher Dip
     if price_change >= 0:
         return 30
-
-    # Mapping:
-    # 0 Differenz   -> ~30
-    # +20 Punkte    -> ~50
-    # +40 Punkte    -> ~70
-    # +60 Punkte    -> ~90
-    # +80 Punkte    -> 100
 
     score = 30 + divergence
 
@@ -397,7 +426,7 @@ def calculate_dip_score(
 
 
 # ============================================================
-# 8. RISK SCORE
+# RISK SCORE
 # ============================================================
 
 def calculate_risk_score(
@@ -405,44 +434,36 @@ def calculate_risk_score(
     debt_to_equity,
     volatility,
     earnings_volatility,
-    balance_sheet_strength,
+    balance_sheet_strength
 ):
-    """
-    RISK SCORE
 
-    100 = sehr niedriges Risiko
-    0   = sehr hohes Risiko
-    """
-
-    # Beta
     beta_score = 100 - normalize_metric(
         beta,
         0.5,
         2.0
     )
 
-    # Verschuldung
     debt_score = 100 - normalize_metric(
         debt_to_equity,
         0,
         250
     )
 
-    # Volatilität
     volatility_score = 100 - normalize_metric(
         volatility,
         10,
         80
     )
 
-    # Gewinnvolatilität
     earnings_vol_score = 100 - normalize_metric(
         earnings_volatility,
         0,
         100
     )
 
-    balance_score = clamp(balance_sheet_strength)
+    balance_score = clamp(
+        balance_sheet_strength
+    )
 
     score = (
         0.20 * beta_score
@@ -456,7 +477,7 @@ def calculate_risk_score(
 
 
 # ============================================================
-# 9. INVESTMENT SCORE
+# INVESTMENT SCORE
 # ============================================================
 
 def calculate_investment_score(
@@ -464,44 +485,24 @@ def calculate_investment_score(
     kpax_fv,
     dip,
     risk,
-    weights=None,
+    weights
 ):
-    """
-    Investment Score
 
-    DEFAULT:
-
-        35 % KPAX
-        40 % KPAX-FV
-        15 % Dip
-        10 % Risk
-
-    Risk Score:
-        100 = wenig Risiko
-        daher direkt positiv gewichtet.
-    """
-
-    if weights is None:
-        weights = DEFAULT_WEIGHTS
-
-    score = (
+    return clamp(
         weights["kpax"] * kpax
         + weights["kpax_fv"] * kpax_fv
         + weights["dip"] * dip
         + weights["risk"] * risk
     )
 
-    return clamp(score)
-
 
 # ============================================================
-# 10. PRICE ATTRACTIVENESS
+# PRICE ATTRACTIVENESS
 # ============================================================
 
-def calculate_price_attractiveness(fv_upside):
-    """
-    Ein einfaches, separates Preisattraktivitäts-Rating.
-    """
+def calculate_price_attractiveness(
+    fv_upside
+):
 
     if fv_upside is None or pd.isna(fv_upside):
         return np.nan
@@ -531,13 +532,10 @@ def calculate_price_attractiveness(fv_upside):
 
 
 # ============================================================
-# 11. VERDICT
+# VERDICT
 # ============================================================
 
 def get_verdict(score):
-    """
-    Unsere Investment-Score Schwellen.
-    """
 
     if score >= 82.5:
         return "🟢 STRONG BUY"
@@ -555,13 +553,13 @@ def get_verdict(score):
 
 
 # ============================================================
-# 12. COMPLETE STOCK CALCULATION
+# SINGLE STOCK
 # ============================================================
 
-def calculate_stock(data, weights=None):
-    """
-    Führt die komplette KPAX-Berechnung für eine Aktie aus.
-    """
+def calculate_stock(
+    data,
+    weights
+):
 
     quality = calculate_quality_score(
         data.get("roic"),
@@ -595,7 +593,7 @@ def calculate_stock(data, weights=None):
 
     fv_upside = calculate_fv_upside(
         data.get("current_price"),
-        fair_value,
+        fair_value
     )
 
     kpax_fv = calculate_kpax_fv_score(
@@ -622,67 +620,92 @@ def calculate_stock(data, weights=None):
         kpax_fv,
         dip,
         risk,
-        weights,
+        weights
     )
 
     return {
         "Ticker": data.get("ticker"),
         "Name": data.get("name"),
 
-        "Quality": round(quality, 1),
-        "Future": round(future, 1),
-        "KPAX": round(kpax, 1),
+        "Quality": round(
+            quality, 1
+        ),
 
-        "Current Price": data.get("current_price"),
-        "Fair Value": round(fair_value, 2)
-        if not pd.isna(fair_value) else np.nan,
+        "Future": round(
+            future, 1
+        ),
 
-        "FV Upside %": round(fv_upside, 1)
-        if not pd.isna(fv_upside) else np.nan,
+        "KPAX": round(
+            kpax, 1
+        ),
 
-        "KPAX-FV": round(kpax_fv, 1)
-        if not pd.isna(kpax_fv) else np.nan,
+        "Kurs": data.get(
+            "current_price"
+        ),
 
-        "Dip": round(dip, 1),
-        "Risk": round(risk, 1),
+        "Fair Value": round(
+            fair_value, 2
+        )
+        if not pd.isna(fair_value)
+        else np.nan,
+
+        "FV Upside %": round(
+            fv_upside, 1
+        )
+        if not pd.isna(fv_upside)
+        else np.nan,
+
+        "KPAX-FV": round(
+            kpax_fv, 1
+        )
+        if not pd.isna(kpax_fv)
+        else np.nan,
+
+        "Dip": round(
+            dip, 1
+        ),
+
+        "Risk": round(
+            risk, 1
+        ),
 
         "Investment Score": round(
-            investment_score,
+            investment_score, 1
+        ),
+
+        "Price Attractiveness": round(
+            calculate_price_attractiveness(
+                fv_upside
+            ),
             1
         ),
 
-        "Price Attractiveness":
-            round(
-                calculate_price_attractiveness(
-                    fv_upside
-                ),
-                1
-            ),
-
-        "Verdict":
-            get_verdict(investment_score),
+        "Verdict": get_verdict(
+            investment_score
+        ),
     }
 
 
 # ============================================================
-# 13. STREAMLIT UI
+# PAGE HEADER
 # ============================================================
-
-st.set_page_config(
-    page_title="KPAX Weekly Engine",
-    page_icon="📊",
-    layout="wide",
-)
 
 st.title("📊 KPAX Weekly Investment Engine")
-st.caption(APP_VERSION)
+
+st.caption(
+    f"{VERSION} | "
+    "KPAX = Qualität + Zukunft | "
+    "KPAX-FV = Bewertung"
+)
 
 
 # ============================================================
-# SIDEBAR
+# SIDEBAR – WEIGHTS
 # ============================================================
 
-st.sidebar.header("KPAX Gewichtung")
+st.sidebar.header(
+    "⚙️ KPAX Gewichtung"
+)
 
 kpax_weight = st.sidebar.number_input(
     "KPAX",
@@ -724,10 +747,18 @@ weight_sum = (
 )
 
 if abs(weight_sum - 1.0) > 0.001:
+
     st.sidebar.error(
-        f"Gewichtungen müssen 100 % ergeben. "
-        f"Aktuell: {weight_sum:.0%}"
+        f"Gewichtung = {weight_sum:.0%}. "
+        "Bitte exakt 100 % einstellen."
     )
+
+else:
+
+    st.sidebar.success(
+        "Gewichtung = 100 %"
+    )
+
 
 weights = {
     "kpax": kpax_weight,
@@ -738,156 +769,324 @@ weights = {
 
 
 # ============================================================
-# DEMO DATA
+# STOCK UNIVERSE
 # ============================================================
 
-st.subheader("Aktien")
+st.header("📋 Aktien-Universum")
 
-default_data = pd.DataFrame([
-    {
-        "ticker": "NVDA",
-        "name": "NVIDIA",
-        "current_price": 180,
-        "analyst_target": 215,
-        "fcf_fair_value": 205,
-        "roic": 90,
-        "gross_margin": 73,
-        "fcf_margin": 45,
-        "earnings_growth": 35,
-        "revenue_growth": 30,
-        "growth_trend": 90,
-        "analyst_growth": 85,
-        "fcf_profitability_trend": 95,
-        "turnaround_potential": 70,
-        "price_change": -8,
-        "earnings_change": 15,
-        "revenue_change": 12,
-        "analyst_target_change": 5,
-        "beta": 1.7,
-        "debt_to_equity": 30,
-        "volatility": 45,
-        "earnings_volatility": 25,
-        "balance_sheet_strength": 90,
-        "is_financial": False,
-    },
-    {
-        "ticker": "MSFT",
-        "name": "Microsoft",
-        "current_price": 500,
-        "analyst_target": 550,
-        "fcf_fair_value": 535,
-        "roic": 35,
-        "gross_margin": 69,
-        "fcf_margin": 32,
-        "earnings_growth": 15,
-        "revenue_growth": 14,
-        "growth_trend": 85,
-        "analyst_growth": 80,
-        "fcf_profitability_trend": 90,
-        "turnaround_potential": 50,
-        "price_change": -4,
-        "earnings_change": 8,
-        "revenue_change": 7,
-        "analyst_target_change": 3,
-        "beta": 1.0,
-        "debt_to_equity": 45,
-        "volatility": 25,
-        "earnings_volatility": 15,
-        "balance_sheet_strength": 95,
-        "is_financial": False,
-    },
-    {
-        "ticker": "BMW.DE",
-        "name": "BMW",
-        "current_price": 85,
-        "analyst_target": 105,
-        "fcf_fair_value": 100,
-        "roic": 12,
-        "gross_margin": 18,
-        "fcf_margin": 8,
-        "earnings_growth": -3,
-        "revenue_growth": 2,
-        "growth_trend": 55,
-        "analyst_growth": 60,
-        "fcf_profitability_trend": 60,
-        "turnaround_potential": 75,
-        "price_change": -18,
-        "earnings_change": -5,
-        "revenue_change": 2,
-        "analyst_target_change": 4,
-        "beta": 1.2,
-        "debt_to_equity": 120,
-        "volatility": 35,
-        "earnings_volatility": 30,
-        "balance_sheet_strength": 75,
-        "is_financial": False,
-    },
-    {
-        "ticker": "ALV.DE",
-        "name": "Allianz",
-        "current_price": 380,
-        "analyst_target": 430,
-        "fcf_fair_value": 420,
-        "roe": 18,
-        "net_margin": 10,
-        "earnings_growth": 8,
-        "revenue_growth": 6,
-        "growth_trend": 75,
-        "analyst_growth": 75,
-        "fcf_profitability_trend": 80,
-        "turnaround_potential": 40,
-        "price_change": -6,
-        "earnings_change": 5,
-        "revenue_change": 4,
-        "analyst_target_change": 2,
-        "beta": 0.9,
-        "debt_to_equity": 80,
-        "volatility": 20,
-        "earnings_volatility": 15,
-        "balance_sheet_strength": 85,
-        "is_financial": True,
-    },
-])
+st.write(
+    f"**{len(st.session_state.kpax_tickers)} Aktien im Universum**"
+)
 
 
 # ============================================================
-# CALCULATE
+# ADD STOCKS
 # ============================================================
 
-if st.button("🚀 KPAX berechnen", type="primary"):
+col1, col2 = st.columns([4, 1])
 
-    results = []
+with col1:
 
-    for _, row in default_data.iterrows():
+    new_tickers = st.text_input(
+        "Weitere Aktien hinzufügen",
+        placeholder="z. B. ORCL, AVGO, LVMH.PA",
+        label_visibility="collapsed"
+    )
 
-        result = calculate_stock(
-            row.to_dict(),
-            weights=weights,
+with col2:
+
+    add_button = st.button(
+        "➕ Hinzufügen",
+        use_container_width=True
+    )
+
+
+if add_button:
+
+    if new_tickers.strip():
+
+        added = []
+        duplicates = []
+
+        for ticker in new_tickers.split(","):
+
+            ticker = ticker.strip().upper()
+
+            if not ticker:
+                continue
+
+            if ticker in st.session_state.kpax_tickers:
+
+                duplicates.append(ticker)
+
+            else:
+
+                st.session_state.kpax_tickers[
+                    ticker
+                ] = ticker
+
+                added.append(ticker)
+
+        if added:
+
+            st.success(
+                "Hinzugefügt: "
+                + ", ".join(added)
+            )
+
+        if duplicates:
+
+            st.info(
+                "Bereits vorhanden: "
+                + ", ".join(duplicates)
+            )
+
+
+# ============================================================
+# STOCK SELECTION
+# ============================================================
+
+ticker_options = list(
+    st.session_state.kpax_tickers.keys()
+)
+
+selected_tickers = st.multiselect(
+    "Aktien für die Berechnung",
+    options=ticker_options,
+    default=ticker_options,
+    format_func=lambda ticker:
+        f"{ticker} – "
+        f"{st.session_state.kpax_tickers[ticker]}"
+)
+
+
+# ============================================================
+# REMOVE CUSTOM STOCKS
+# ============================================================
+
+with st.expander(
+    "🗑️ Eigene Aktien entfernen"
+):
+
+    custom_tickers = [
+        ticker
+        for ticker in ticker_options
+        if ticker not in DEFAULT_TICKERS
+    ]
+
+    if custom_tickers:
+
+        remove_tickers = st.multiselect(
+            "Auswahl",
+            custom_tickers
         )
 
-        results.append(result)
+        if st.button(
+            "Ausgewählte Aktien entfernen"
+        ):
 
-    result_df = pd.DataFrame(results)
+            for ticker in remove_tickers:
 
-    result_df = result_df.sort_values(
-        "Investment Score",
-        ascending=False
-    )
+                if ticker in st.session_state.kpax_tickers:
+                    del st.session_state.kpax_tickers[
+                        ticker
+                    ]
 
-    st.subheader("KPAX Wochenranking")
+            st.rerun()
 
-    st.dataframe(
-        result_df,
-        use_container_width=True,
-        hide_index=True,
-    )
+    else:
+
+        st.info(
+            "Keine eigenen Aktien vorhanden."
+        )
+
+
+# ============================================================
+# DEMO / INPUT DATA
+# ============================================================
+
+def create_demo_data():
+
+    data = []
+
+    for ticker, name in st.session_state.kpax_tickers.items():
+
+        # neutrale Ausgangswerte
+        row = {
+            "ticker": ticker,
+            "name": name,
+
+            "current_price": 100,
+
+            "analyst_target": 110,
+            "fcf_fair_value": 105,
+
+            "roic": 15,
+            "gross_margin": 40,
+            "fcf_margin": 15,
+
+            "earnings_growth": 10,
+            "revenue_growth": 8,
+
+            "growth_trend": 70,
+            "analyst_growth": 70,
+            "fcf_profitability_trend": 70,
+            "turnaround_potential": 50,
+
+            "price_change": -5,
+            "earnings_change": 5,
+            "revenue_change": 5,
+            "analyst_target_change": 2,
+
+            "beta": 1.0,
+            "debt_to_equity": 50,
+            "volatility": 25,
+            "earnings_volatility": 20,
+
+            "balance_sheet_strength": 75,
+
+            "roe": 15,
+            "net_margin": 10,
+
+            "is_financial": (
+                ticker == "ALV.DE"
+            ),
+        }
+
+        data.append(row)
+
+    return data
+
+
+# ============================================================
+# CALCULATION
+# ============================================================
+
+st.divider()
+
+calculate_button = st.button(
+    "🚀 KPAX-Wochenberechnung starten",
+    type="primary",
+    use_container_width=True
+)
+
+
+if calculate_button:
+
+    if not selected_tickers:
+
+        st.warning(
+            "Bitte mindestens eine Aktie auswählen."
+        )
+
+    elif abs(weight_sum - 1.0) > 0.001:
+
+        st.error(
+            "Die Gewichtungen müssen exakt 100 % ergeben."
+        )
+
+    else:
+
+        demo_data = create_demo_data()
+
+        selected_data = [
+            row
+            for row in demo_data
+            if row["ticker"] in selected_tickers
+        ]
+
+        results = []
+
+        for row in selected_data:
+
+            result = calculate_stock(
+                row,
+                weights
+            )
+
+            results.append(result)
+
+        result_df = pd.DataFrame(
+            results
+        )
+
+        result_df = result_df.sort_values(
+            "Investment Score",
+            ascending=False
+        ).reset_index(drop=True)
+
+        result_df.insert(
+            0,
+            "Rang",
+            range(1, len(result_df) + 1)
+        )
+
+        st.header(
+            "🏆 KPAX Wochenranking"
+        )
+
+        st.dataframe(
+            result_df,
+            use_container_width=True,
+            hide_index=True
+        )
+
+        # ----------------------------------------------------
+        # TOP PICKS
+        # ----------------------------------------------------
+
+        st.subheader(
+            "⭐ Top KPAX Picks"
+        )
+
+        top3 = result_df.head(3)
+
+        cols = st.columns(
+            len(top3)
+        )
+
+        for col, (_, row) in zip(
+            cols,
+            top3.iterrows()
+        ):
+
+            with col:
+
+                st.metric(
+                    row["Ticker"],
+                    f'{row["Investment Score"]:.1f}',
+                    row["Verdict"]
+                )
+
+                st.caption(
+                    row["Name"]
+                )
+
+
+        # ----------------------------------------------------
+        # CSV DOWNLOAD
+        # ----------------------------------------------------
+
+        csv = result_df.to_csv(
+            index=False
+        ).encode("utf-8")
+
+        st.download_button(
+            "📥 KPAX-Tabelle als CSV",
+            csv,
+            "kpax_weekly.csv",
+            "text/csv",
+            use_container_width=True
+        )
 
 
 # ============================================================
 # FORMULAS
 # ============================================================
 
-with st.expander("🧮 Mathematik des KPAX-Modells"):
+with st.expander(
+    "🧮 KPAX-Formeln"
+):
 
     st.markdown("""
 ### KPAX
@@ -896,82 +1095,79 @@ with st.expander("🧮 Mathematik des KPAX-Modells"):
 
 Normale Unternehmen:
 
-`Quality = 30% ROIC + 15% Gross Margin + 20% FCF Margin + 20% Earnings Growth + 15% Revenue Growth`
+`Quality = 30 % ROIC + 15 % Gross Margin + 20 % FCF Margin + 20 % Earnings Growth + 15 % Revenue Growth`
 
 Financials:
 
-`Quality = 40% ROE + 30% Net Margin + 20% Earnings Growth + 10% Revenue Growth`
+`Quality = 40 % ROE + 30 % Net Margin + 20 % Earnings Growth + 10 % Revenue Growth`
 
 **Future**
 
-`Future = 30% Earnings Growth + 20% Revenue Growth + 15% Growth Trend + 15% Analyst Growth + 10% FCF/Profitability Trend + 10% Turnaround`
+`Future = 30 % Earnings Growth + 20 % Revenue Growth + 15 % Growth Trend + 15 % Analyst Growth + 10 % FCF/Profitability Trend + 10 % Turnaround`
 
 **KPAX**
 
-`KPAX = 40% Quality + 60% Future`
+`KPAX = 40 % Quality + 60 % Future`
 
 ---
 
 ### Fair Value
 
-`Fair Value = 60% Analyst Target + 40% FCF Fair Value`
+`Fair Value = 60 % Analyst Target + 40 % FCF Fair Value`
 
 ### FV-Upside
 
-`FV-Upside = (Fair Value - aktueller Kurs) / aktueller Kurs × 100`
-
-### KPAX-FV
-
-Der FV-Upside wird anschließend in einen Score von 0–100 überführt.
+`FV-Upside = (Fair Value - Kurs) / Kurs × 100`
 
 ### Investment Score
 
-Aktuelle Gewichtung:
+Standard:
 
-`Investment Score = 35% KPAX + 40% KPAX-FV + 15% Dip + 10% Risk`
+`35 % KPAX + 40 % KPAX-FV + 15 % Dip + 10 % Risk`
 
-Dabei gilt:
+---
 
-**Risk = 100 → sehr geringes Risiko**
+### Investment Score
 
-**Risk = 0 → sehr hohes Risiko**
-
-### Grundidee
-
-**KPAX = Qualität + Zukunft**
-
-**KPAX-FV = Bewertung**
-
-**Dip = Chance durch überproportionalen Kursrückgang**
-
-**Risk = Risikopuffer**
-
-Der aktuelle Kurs verändert **nicht** den KPAX selbst.
-Er beeinflusst dagegen KPAX-FV, Dip und damit den Investment Score.
+| Score | Urteil |
+|---:|---|
+| ≥ 82,5 | 🟢 STRONG BUY |
+| 77,5–82,4 | 🟢 BUY |
+| 70–77,4 | 🟡 HOLD / ACCUMULATE |
+| 55–69,9 | 🟠 WATCH / REDUCE |
+| < 55 | 🔴 AVOID |
 """)
 
 
 # ============================================================
-# VERDICT TABLE
+# INFO
 # ============================================================
 
-with st.expander("🎯 Investment-Score Schwellen"):
+st.info(
+    "Hinweis: Diese Version enthält bereits das komplette "
+    "KPAX-Berechnungsmodell und das Aktien-Universum. "
+    "Die Fundamentaldaten sind aktuell Demo-/Platzhalterwerte. "
+    "Für die echte Wochenberechnung müssen diese im nächsten "
+    "Schritt automatisch über yfinance bzw. weitere Datenquellen "
+    "geladen werden."
+)
+```
 
-    verdict_table = pd.DataFrame({
-        "Score": [
-            "≥ 82.5",
-            "77.5 – 82.4",
-            "70 – 77.4",
-            "55 – 69.9",
-            "< 55",
-        ],
-        "Urteil": [
-            "STRONG BUY",
-            "BUY",
-            "HOLD / ACCUMULATE",
-            "WATCH / REDUCE",
-            "AVOID",
-        ],
-    })
+### `requirements.txt`
 
-    st.table(verdict_table)
+Dazu gehört:
+
+```txt
+streamlit
+pandas
+numpy
+yfinance
+```
+
+**Aber:** Ich würde diesen Stand noch **nicht als endgültigen KPAX bezeichnen**. Der entscheidende nächste Schritt ist die automatische Datenversorgung. Aktuell würde beispielsweise jede neu hinzugefügte Aktie zunächst mit den neutralen Demo-Werten `ROIC=15`, `Growth=10 %`, `Fair Value=+10 %` usw. bewertet.
+
+Für deine eigentliche Anwendung sollte der Ablauf stattdessen sein:
+
+**Ticker → yfinance → Fundamentaldaten → Analystenziel → Fair Value → KPAX → KPAX-FV → Dip → Risk → Investment Score → Ranking.**
+
+Dann entspricht das wirklich unserer **wöchentlichen KPAX-Berechnung** und nicht nur einer Streamlit-Oberfläche dafür.
